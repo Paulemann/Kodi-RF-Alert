@@ -10,7 +10,6 @@ import logging
 import configparser
 import os
 import sys
-import time
 import socket
 import signal
 
@@ -63,8 +62,8 @@ def log(message, level='INFO'):
 
 
 def read_config():
-  global _kodi_, _kodi_port_, _kodi_user_, _kodi_passwd_
-  global _gpio_rxdata_, _rf_alertcode_, _notify_title_, _notify_text_
+  global _kodi_hosts_, _kodi_port_, _kodi_user_, _kodi_passwd_
+  global _gpio_rxdata_, _rf_alertcodes_, _notify_title_, _notify_text_
   global _exec_local_
 
   if not os.path.exists(_config_file_):
@@ -79,13 +78,12 @@ def read_config():
 
     config.read([os.path.abspath(_config_file_)])
 
-    _kodi_          = [p.strip(' "\'') for p in config.get('KODI JSON-RPC', 'hostname').split(',')]
-   #_kodi_          = config.get('KODI JSON-RPC', 'hostname')
+    _kodi_hosts_    = [p.strip(' "\'') for p in config.get('KODI JSON-RPC', 'hostname').split(',')]
     _kodi_port_     = config.get('KODI JSON-RPC', 'port')
     _kodi_user_     = config.get('KODI JSON-RPC', 'username')
     _kodi_passwd_   = config.get('KODI JSON-RPC', 'password')
 
-    for host in _kodi_:
+    for host in _kodi_hosts_:
       if not is_hostname(host):
         log('Wrong or missing value(s) in configuration file (section: [KODI JSON-RPC]).')
         return False
@@ -100,12 +98,11 @@ def read_config():
     else:
        _gpio_rxdata_   = int(value)
 
-    value           = config.get('RF Alert', 'code')
-    if not is_int(value):
+    try:
+      _rf_alertcodes_ = [int(p.strip(' "\'')) for p in config.get('RF Alert', 'code').split(',')]
+    except:
       log('Wrong or missing value(s) in configuration file (section: [RF Alert]).')
       return False
-    else:
-       _rf_alertcode_  = int(value)
 
     _notify_title_  = config.get('Alert Notification', 'title')
     _notify_text_   = config.get('Alert Notification', 'text')
@@ -150,18 +147,19 @@ def host_is_up(host, port):
   return True
 
 
-def alert(title, message):
-  for host in _kodi_:
+def alert():
+  for host in _kodi_hosts_:
     if not host_is_up(host, _kodi_port_):
       log('Host {} is down. Requests canceled.'.format(host))
       return
 
-    if title and message:
-      log('Requesting notification \'{}: {}\' on host {} ...'.format(title, message, host))
-      kodi_request(host, 'GUI.ShowNotification', {'title': title, 'message': message, 'displaytime': 2000})
+    if _notify_title_ and _notify_text_:
+      log('Requesting notification \'{}: {}\' on host {} ...'.format(_notify_title_, _notify_text_, host))
+      kodi_request(host, 'GUI.ShowNotification', {'title': _notify_title_, 'message': _notify_text_, 'displaytime': 2000})
 
-    log('Requesting execution of addon \'{}\' on host {} ...'.format(_addon_id_, host))
-    kodi_request(host, 'Addons.ExecuteAddon', {'addonid': _addon_id_})
+    if _addon_id_:
+      log('Requesting execution of addon \'{}\' on host {} ...'.format(_addon_id_, host))
+      kodi_request(host, 'Addons.ExecuteAddon', {'addonid': _addon_id_})
 
 
 if __name__ == '__main__':
@@ -195,7 +193,7 @@ if __name__ == '__main__':
     sys.exit(1)
 
   if _test_:
-    alert(_notify_title_, _notify_text_)
+    alert()
     sys.exit(0)
 
   rfdevice = None
@@ -214,15 +212,15 @@ if __name__ == '__main__':
           timestamp = rfdevice.rx_code_timestamp
           log('{} [pulselength {}, protocol {}]'.format(rfdevice.rx_code, rfdevice.rx_pulselength, rfdevice.rx_proto), level='DEBUG')
 
-          if rfdevice.rx_code == _rf_alertcode_:
-            log('Received 433 MHz signal with matching alert code {}'.format(_rf_alertcode_))
+          if rfdevice.rx_code in _rf_alertcodes_:
+            log('Received 433 MHz signal with matching alert code {}'.format(rfdevice.rx_code))
             if _exec_local_:
               try:
                 os.system(_exec_local_)
               except:
                 log('Could not execute local command \'{}\'.'.format(_exec_local_), level='ERROR')
                 pass
-            alert(_notify_title_, _notify_text_)
+            alert()
 
         time.sleep(0.01)
 
